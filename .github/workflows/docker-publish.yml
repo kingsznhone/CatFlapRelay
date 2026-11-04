@@ -58,7 +58,6 @@ jobs:
           tags: |
             kingsznhone/catflap-relay:latest
             kingsznhone/catflap-relay:${{ steps.version.outputs.version }}
-            kingsznhone/catflap-relay:${{ steps.version.outputs.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
