@@ -6,7 +6,7 @@
   <img src="./README/CatFlapRelay.png" width="128" />
 </div>
 
-**A modern, high-performance TCP/UDP port forwarding toolkit built with .NET 10**
+**A modern, easy-to-manage, cross-platform TCP/UDP port forwarding toolkit built with .NET 10**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-purple.svg?style=flat-square)](https://dotnet.microsoft.com/)
@@ -120,7 +120,7 @@ relay.Start();
 await relay.StopAsync();
 ```
 
-> **Package page:** https://www.nuget.org/packages/CatFlapRelay/1.0.0
+> **Package page:** https://www.nuget.org/packages/CatFlapRelay/
 
 ---
 
@@ -144,8 +144,8 @@ catflaprelay-cli -l 0.0.0.0:25565 -t 10.0.0.5:25565
 # TCP only, custom name
 catflaprelay-cli -l 0.0.0.0:8080 -t 192.168.1.10:80 --no-udp -n "WebProxy"
 
-# UDP only with larger buffer (512 KB)
-catflaprelay-cli -l [::]:53 -t 8.8.8.8:53 --no-tcp -b 524288
+# UDP only, 4 sender workers for many clients at high packet rates
+catflaprelay-cli -l [::]:53 -t 8.8.8.8:53 --no-tcp --udp-senders 4
 
 # IPv6 listen → IPv4 target (dual-stack bridge)
 catflaprelay-cli -l [::]:443 -t 127.0.0.1:8443
@@ -158,23 +158,29 @@ catflaprelay-cli -l 0.0.0.0:5000 -t 10.0.0.1:5000 -v
 
 | Flag | Short | Description | Default |
 |------|-------|-------------|---------|
-| `--listen` | `-l` | Listen endpoint (`host:port`) | *required* |
-| `--target` | `-t` | Target endpoint (`host:port`) | *required* |
+| `--listen` | `-l` | Listen endpoint (`ip:port`, an IP address; host names are not supported) | *required* |
+| `--target` | `-t` | Target endpoint (`ip:port`, an IP address; host names are not supported) | *required* |
 | `--name` | `-n` | Relay display name | `Relay_XXXX` |
 | `--no-tcp` | | Disable TCP forwarding | `false` |
 | `--no-udp` | `-U` | Disable UDP forwarding | `false` |
-| `--buffer-size` | `-b` | I/O buffer size in bytes | `131072` (128 KB) |
+| `--buffer-size` | `-b` | TCP I/O buffer size in bytes (not used by UDP) | `131072` (128 KB) |
 | `--timeout` | | Socket timeout in milliseconds | `1000` |
 | `--udp-senders` | | Number of UDP sender workers (power of two, 1–64). Packets of one client always use the same sender, so order is preserved. Only raise for very high packet rates from many clients. | `1` |
 | `--dual-mode` | | Accept IPv4 connections on an IPv6 socket (`[::]`). Linux defaults to IPv6-only (RFC 3493); this flag mirrors Windows behaviour. | `false` |
 | `--verbose` | `-v` | Enable debug logging | `false` |
 | `--quiet` | `-q` | Suppress info logging | `false` |
+| `--log-level` | | Set the log level explicitly: `Verbose`, `Debug`, `Information`, `Warning`, `Error`, `Fatal`. Takes precedence over `-v` / `-q` | `Information` |
 
 ---
 
 ## Management Panel (Docker)
 
 The Panel provides a web-based dashboard with Ant Design UI and a Swagger-documented REST API for managing multiple relays.
+
+- Create, edit, start, stop and delete relays from the browser; the configuration is stored in SQLite.
+- Live statistics per relay: active TCP connections, UDP tunnels, bytes transferred, errors, and UDP datagrams dropped when the relay is overloaded (the `Dropped` value turns red while it is still growing).
+- Per-relay settings for TCP/UDP, buffer size, timeouts, UDP sender workers and dual-stack mode.
+- The Swagger UI is embedded under **API** in the sidebar and is also available at `/swagger`.
 
 <div align="center">
   <img src="./README/Demo.jpg"  />
@@ -247,7 +253,7 @@ docker run --rm \
 
 ### Panel Configuration
 
-Configurable via `appsettings.json` or environment variables (`PanelSettings__*`):
+Configurable via `appsettings.json` or environment variables (`__` replaces `:`, for example `PanelSettings__MaxRelays`):
 
 | Key | Description | Default |
 |-----|-------------|---------|
@@ -255,6 +261,12 @@ Configurable via `appsettings.json` or environment variables (`PanelSettings__*`
 | `PanelSettings:MaxNameLength` | Max relay name length | `128` |
 | `PanelSettings:MaxEndpointLength` | Max host:port string length | `64` |
 | `PanelSettings:MaxBufferSize` | Max I/O buffer size (bytes) | `67108864` (64 MB) |
+| `Admin:UserName` | Initial admin user name | `admin` |
+| `Admin:Password` | Initial admin password; a random one is generated and logged when empty | *(empty)* |
+| `JwtSettings:Key` | Hex key used to sign JWTs; generated on every start when empty, which invalidates existing tokens on restart | *(empty)* |
+| `Cors:AllowedOrigins` | Browser origins allowed to call the API | *(none)* |
+| `DataPath` | Directory of the SQLite database; an unwritable path falls back to an in-memory database | `data` (`/app/data` in Docker) |
+| `ConnectionStrings:DefaultConnection` | SQLite connection string | `Data Source=data/app.db;` |
 
 ### REST API Examples
 
@@ -285,7 +297,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/rela
 ┌──────────────────────────────────────────────────┐
 │                  CatFlapRelay                    │
 │  FlapRelay ─ FlapRelayManager ─ FlapRelayFactory │
-│  TCP stream relay  │  UDP tunnel relay           │
+│  TCP stream relay  │  UDP tunnel relay + senders │
 └──────────┬──────────────────┬────────────────────┘
            │                  │
      ┌─────┴──────────┐ ┌─────┴──────────────────┐

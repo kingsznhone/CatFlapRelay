@@ -6,7 +6,7 @@
   <img src="./README/CatFlapRelay.png" width="128" />
 </div>
 
-**基于 .NET 10 构建的现代高性能 TCP/UDP 端口转发工具包**
+**基于 .NET 10 构建的现代化、易管理、跨平台的 TCP/UDP 端口转发工具包**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-purple.svg?style=flat-square)](https://dotnet.microsoft.com/)
@@ -120,7 +120,7 @@ relay.Start();
 await relay.StopAsync();
 ```
 
-> **包页面：** https://www.nuget.org/packages/CatFlapRelay/1.0.0
+> **包页面：** https://www.nuget.org/packages/CatFlapRelay/
 
 ---
 
@@ -144,8 +144,8 @@ catflaprelay-cli -l 0.0.0.0:25565 -t 10.0.0.5:25565
 # 仅 TCP，自定义名称
 catflaprelay-cli -l 0.0.0.0:8080 -t 192.168.1.10:80 --no-udp -n "WebProxy"
 
-# 仅 UDP，更大缓冲区（512 KB）
-catflaprelay-cli -l [::]:53 -t 8.8.8.8:53 --no-tcp -b 524288
+# 仅 UDP，4 个发送者（多客户端、高包速率）
+catflaprelay-cli -l [::]:53 -t 8.8.8.8:53 --no-tcp --udp-senders 4
 
 # IPv6 监听 → IPv4 目标（双栈桥接）
 catflaprelay-cli -l [::]:443 -t 127.0.0.1:8443
@@ -158,23 +158,29 @@ catflaprelay-cli -l 0.0.0.0:5000 -t 10.0.0.1:5000 -v
 
 | 参数 | 短参数 | 说明 | 默认值 |
 |------|--------|------|--------|
-| `--listen` | `-l` | 监听端点（`host:port`） | *必填* |
-| `--target` | `-t` | 目标端点（`host:port`） | *必填* |
+| `--listen` | `-l` | 监听端点（`ip:port`，只能是 IP 地址，不支持主机名） | *必填* |
+| `--target` | `-t` | 目标端点（`ip:port`，只能是 IP 地址，不支持主机名） | *必填* |
 | `--name` | `-n` | 转发规则显示名称 | `Relay_XXXX` |
 | `--no-tcp` | | 禁用 TCP 转发 | `false` |
 | `--no-udp` | `-U` | 禁用 UDP 转发 | `false` |
-| `--buffer-size` | `-b` | I/O 缓冲区大小（字节） | `131072`（128 KB） |
+| `--buffer-size` | `-b` | TCP I/O 缓冲区大小（字节），UDP 不使用 | `131072`（128 KB） |
 | `--timeout` | | Socket 超时（毫秒） | `1000` |
 | `--udp-senders` | | UDP 发送者数量（2 的幂，1–64）。同一客户端的数据包始终由同一个发送者处理，不会乱序。仅在多客户端、包速率极高时才需要调大。 | `1` |
 | `--dual-mode` | | 在 IPv6 套接字（`[::]`）上同时接受 IPv4 连接。Linux 默认仅 IPv6（RFC 3493），此标志可还原为 Windows 行为。 | `false` |
 | `--verbose` | `-v` | 启用调试日志 | `false` |
 | `--quiet` | `-q` | 抑制 info 日志 | `false` |
+| `--log-level` | | 显式指定日志级别：`Verbose`、`Debug`、`Information`、`Warning`、`Error`、`Fatal`。优先于 `-v` / `-q` | `Information` |
 
 ---
 
 ## 管理面板（Docker）
 
 管理面板提供基于 Ant Design 的 Web 仪表盘以及带 Swagger 文档的 REST API，用于管理多个转发规则。
+
+- 在浏览器中创建、编辑、启动、停止和删除转发规则，配置保存在 SQLite 中。
+- 每条规则的实时统计：活跃 TCP 连接数、UDP 隧道数、传输字节数、错误数，以及转发过载时丢弃的 UDP 数据包数（`Dropped` 在仍在增长时显示为红色）。
+- 每条规则可单独设置 TCP/UDP、缓冲区大小、超时、UDP 发送者数量和双栈模式。
+- Swagger UI 内嵌在侧边栏的 **API** 页面中，也可以直接访问 `/swagger`。
 
 <div align="center">
   <img src="./README/Demo.jpg"  />
@@ -247,7 +253,7 @@ docker run --rm \
 
 ### 面板配置
 
-可通过 `appsettings.json` 或环境变量（`PanelSettings__*`）进行配置：
+可通过 `appsettings.json` 或环境变量（用 `__` 代替 `:`，例如 `PanelSettings__MaxRelays`）进行配置：
 
 | 配置项 | 说明 | 默认值 |
 |--------|------|--------|
@@ -255,6 +261,12 @@ docker run --rm \
 | `PanelSettings:MaxNameLength` | 规则名称最大长度 | `128` |
 | `PanelSettings:MaxEndpointLength` | host:port 字符串最大长度 | `64` |
 | `PanelSettings:MaxBufferSize` | 最大 I/O 缓冲区（字节） | `67108864`（64 MB） |
+| `Admin:UserName` | 初始管理员用户名 | `admin` |
+| `Admin:Password` | 初始管理员密码；为空时自动生成随机密码并写入日志 | *（空）* |
+| `JwtSettings:Key` | 用于签发 JWT 的十六进制密钥；为空时每次启动重新生成，重启后已签发的令牌会失效 | *（空）* |
+| `Cors:AllowedOrigins` | 允许调用 API 的浏览器来源 | *（无）* |
+| `DataPath` | SQLite 数据库所在目录；目录不可写时回退到内存数据库 | `data`（Docker 中为 `/app/data`） |
+| `ConnectionStrings:DefaultConnection` | SQLite 连接字符串 | `Data Source=data/app.db;` |
 
 ### REST API 示例
 
@@ -285,7 +297,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/rela
 ┌──────────────────────────────────────────────────┐
 │                  CatFlapRelay                    │
 │  FlapRelay ─ FlapRelayManager ─ FlapRelayFactory │
-│  TCP 流转发      │  UDP 隧道转发                  │
+│  TCP 流转发      │  UDP 隧道转发 + 发送者         │
 └──────────┬──────────────────┬────────────────────┘
            │                  │
      ┌─────┴──────────┐ ┌─────┴──────────────────┐
@@ -308,3 +320,11 @@ curl -X POST -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/v1/rela
 ## 许可证
 
 [MIT](LICENSE) © KingsZNHONE
+
+# 问题反馈
+
+请提交 Issue。
+
+# 参与贡献
+
+欢迎提交 PR。
