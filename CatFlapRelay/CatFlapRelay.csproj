@@ -13,7 +13,7 @@
     <Title>CatFlapRelay</Title>
     <Authors>KingsZNHONE</Authors>
     <Copyright>Copyright © KingsZNHONE 2024-present</Copyright>
-    <Description>Core library for CatFlapRelay — a modern, high-performance TCP/UDP port forwarding toolkit built with .NET 10.</Description>
+    <Description>Core library for CatFlapRelay — a modern, easy-to-manage, cross-platform TCP/UDP port forwarding toolkit built with .NET 10.</Description>
     <PackageTags>tcp;udp;port-forwarding;relay;proxy;networking;ipv4;ipv6;dual-stack;cross-platform;dotnet</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/kingsznhone/CatFlapRelay</RepositoryUrl>
