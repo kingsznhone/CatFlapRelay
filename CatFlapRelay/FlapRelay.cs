@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
 namespace CatFlapRelay
@@ -15,6 +16,15 @@ namespace CatFlapRelay
         private readonly IPEndPoint _targetEndpoint;
         private CancellationTokenSource _cts = new();
         private readonly ConcurrentDictionary<IPEndPoint, UdpTunnelInfo> _udpMap = new();
+
+        // The OS default UDP receive buffer (~64 KB on Windows) overflows within a few
+        // dozen packets when the single receive loop is momentarily slower than the sender.
+        private const int UdpSocketBufferSize = 4 * 1024 * 1024;
+
+        // Per-sender queue depth in datagrams. When a queue is full the datagram is dropped and counted
+        // instead of growing memory or delaying everything behind it.
+        private const int UdpSenderQueueCapacity = 8192;
+        private const int MaxUdpDatagramSize = 65535;
         private readonly List<Task> _activeTasks = new();
         private readonly Lock _activeTasksLock = new();
         private readonly Lock _stateLock = new();
@@ -29,6 +39,7 @@ namespace CatFlapRelay
         private long _tcpBytesReceived = 0;
         private long _udpBytesSent = 0;
         private long _udpBytesReceived = 0;
+        private long _udpPacketsDropped = 0;
         private long _connectionErrors = 0;
         private TcpListener? _tcpListener;
         private UdpClient? _udpListener;
@@ -65,6 +76,7 @@ namespace CatFlapRelay
             TcpBytesReceived = _tcpBytesReceived,
             UdpBytesSent = _udpBytesSent,
             UdpBytesReceived = _udpBytesReceived,
+            UdpPacketsDropped = _udpPacketsDropped,
             ConnectionErrors = _connectionErrors
         };
 
@@ -133,6 +145,9 @@ namespace CatFlapRelay
                         {
                             _udpListener = new UdpClient(_listenEndpoint);
                         }
+                        DisableUdpConnReset(_udpListener.Client);
+                        _udpListener.Client.ReceiveBufferSize = UdpSocketBufferSize;
+                        _udpListener.Client.SendBufferSize = UdpSocketBufferSize;
                     }
                 }
                 catch
@@ -413,19 +428,49 @@ namespace CatFlapRelay
 
         private async Task StartUDPForwarding(CancellationToken ct)
         {
+            // Receiving and sending run in different loops joined by bounded queues: the receive loop
+            // only reads, resolves the tunnel and enqueues; the sender workers perform the send syscalls.
+            int senderCount = _option.UdpSenderCount;
+            var queues = new Channel<UdpPacket>[senderCount];
+            var senders = new Task[senderCount];
+            for (int i = 0; i < senderCount; i++)
+            {
+                var queue = Channel.CreateBounded<UdpPacket>(new BoundedChannelOptions(UdpSenderQueueCapacity)
+                {
+                    SingleReader = true,
+                    SingleWriter = true,
+                    FullMode = BoundedChannelFullMode.Wait // TryWrite returns false when full
+                });
+                queues[i] = queue;
+                senders[i] = Task.Run(() => RunUdpSenderAsync(queue.Reader, ct), CancellationToken.None);
+            }
+
+            var receiveBuffer = new byte[MaxUdpDatagramSize];
+            EndPoint anyRemote = _listenEndpoint.AddressFamily == AddressFamily.InterNetworkV6
+                ? new IPEndPoint(IPAddress.IPv6Any, 0)
+                : new IPEndPoint(IPAddress.Any, 0);
+
             try
             {
                 while (!ct.IsCancellationRequested)
                 {
-                    var initDataBlock = await _udpListener!.ReceiveAsync(ct);
-                    var clientEndpoint = initDataBlock.RemoteEndPoint;
+                    var received = await _udpListener!.Client.ReceiveFromAsync(receiveBuffer, SocketFlags.None, anyRemote, ct);
+                    var clientEndpoint = (IPEndPoint)received.RemoteEndPoint;
 
                     if (!_udpMap.TryGetValue(clientEndpoint, out var tunnelInfo))
                     {
+                        // Bind eagerly (ephemeral port, target's address family). An unbound
+                        // UdpClient is only bound by its first SendAsync, which races with the
+                        // tunnel task's first ReceiveAsync and fails with WSAEINVAL (10022).
+                        var tunnelClient = new UdpClient(0, _targetEndpoint.AddressFamily);
+                        DisableUdpConnReset(tunnelClient.Client);
+                        tunnelClient.Client.ReceiveBufferSize = UdpSocketBufferSize;
+                        tunnelClient.Client.SendBufferSize = UdpSocketBufferSize;
                         var newTunnel = new UdpTunnelInfo
                         {
-                            Client = new UdpClient(),
-                            LastActivity = DateTime.UtcNow
+                            Client = tunnelClient,
+                            LastActivity = DateTime.UtcNow,
+                            SenderIndex = GetSenderIndex(clientEndpoint, senderCount)
                         };
 
                         if (_udpMap.TryAdd(clientEndpoint, newTunnel))
@@ -449,8 +494,17 @@ namespace CatFlapRelay
                     // Update last activity
                     tunnelInfo.LastActivity = DateTime.UtcNow;
 
-                    await tunnelInfo.Client.SendAsync(initDataBlock.Buffer, _targetEndpoint, ct);
-                    Interlocked.Add(ref _udpBytesSent, initDataBlock.Buffer.Length);
+                    // The scratch buffer is reused for the next receive, so copy into a pooled buffer
+                    // that travels through the queue and is returned by the sender.
+                    int length = received.ReceivedBytes;
+                    var packetBuffer = ArrayPool<byte>.Shared.Rent(length);
+                    receiveBuffer.AsSpan(0, length).CopyTo(packetBuffer);
+
+                    if (!queues[tunnelInfo.SenderIndex].Writer.TryWrite(new UdpPacket(tunnelInfo, packetBuffer, length)))
+                    {
+                        ArrayPool<byte>.Shared.Return(packetBuffer);
+                        Interlocked.Increment(ref _udpPacketsDropped);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -460,6 +514,65 @@ namespace CatFlapRelay
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Relay [{Name}] UDP forwarding failed unexpectedly", _option.Name);
+            }
+            finally
+            {
+                // Let the senders drain what is queued (or exit at once when cancelled), then recycle leftovers.
+                foreach (var queue in queues)
+                    queue.Writer.TryComplete();
+                await Task.WhenAll(senders).ConfigureAwait(false);
+                foreach (var queue in queues)
+                {
+                    while (queue.Reader.TryRead(out var leftover))
+                        ArrayPool<byte>.Shared.Return(leftover.Buffer);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Maps a client endpoint to a sender index. The sender count is a power of two, so the
+        /// partition is a bit mask. HashCode is xxHash32-based and is seeded per process, which is
+        /// fine because the mapping only has to be stable while the relay runs.
+        /// </summary>
+        private static int GetSenderIndex(IPEndPoint clientEndpoint, int senderCount)
+        {
+            if (senderCount == 1)
+                return 0;
+
+            int hash = HashCode.Combine(clientEndpoint.Address, clientEndpoint.Port);
+            return hash & (senderCount - 1);
+        }
+
+        private async Task RunUdpSenderAsync(ChannelReader<UdpPacket> reader, CancellationToken ct)
+        {
+            try
+            {
+                while (await reader.WaitToReadAsync(ct).ConfigureAwait(false))
+                {
+                    while (reader.TryRead(out var packet))
+                    {
+                        try
+                        {
+                            await packet.Tunnel.Client.SendAsync(
+                                packet.Buffer.AsMemory(0, packet.Length), _targetEndpoint, ct).ConfigureAwait(false);
+                            Interlocked.Add(ref _udpBytesSent, packet.Length);
+                        }
+                        catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
+                        {
+                            // The tunnel was closed (idle timeout) while the datagram was queued, or the
+                            // send failed; losing a single UDP datagram is acceptable.
+                            _logger.LogDebug(ex, "Dropped UDP datagram for closed or failing tunnel");
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(packet.Buffer);
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Relay is stopping; leftover buffers are recycled by StartUDPForwarding.
             }
         }
 
@@ -492,10 +605,6 @@ namespace CatFlapRelay
 
                         Interlocked.Add(ref _udpBytesReceived, receivedData.Buffer.Length);
                         await udpListener.SendAsync(receivedData.Buffer, callbackEndpoint, ct);
-
-                        // Reset timeout for next receive
-                        timeoutCts.Dispose();
-                        timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     }
                     catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                     {
@@ -505,6 +614,12 @@ namespace CatFlapRelay
                         {
                             break;
                         }
+
+                        // The timeout fired although traffic is still flowing (the other direction
+                        // refreshed LastActivity). A canceled CTS stays canceled, so replace it;
+                        // otherwise it is reused (CancelAfter re-arms it) to avoid a per-packet allocation.
+                        timeoutCts.Dispose();
+                        timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                     }
                 }
             }
@@ -541,10 +656,26 @@ namespace CatFlapRelay
             }
         }
 
+        /// <summary>
+        /// Windows reports an ICMP "port unreachable" for a previous send as WSAECONNRESET (10054)
+        /// on the next receive of an unconnected UDP socket, which would kill the receive loop.
+        /// </summary>
+        private static void DisableUdpConnReset(Socket socket)
+        {
+            if (!OperatingSystem.IsWindows())
+                return;
+            const int SIO_UDP_CONNRESET = -1744830452;
+            try { socket.IOControl((IOControlCode)SIO_UDP_CONNRESET, [0, 0, 0, 0], null); }
+            catch (SocketException) { }
+        }
+
         private class UdpTunnelInfo
         {
             public required UdpClient Client { get; init; }
             public DateTime LastActivity { get; set; }
+            public int SenderIndex { get; init; }
         }
+
+        private readonly record struct UdpPacket(UdpTunnelInfo Tunnel, byte[] Buffer, int Length);
     }
 }

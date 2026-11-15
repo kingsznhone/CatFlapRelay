@@ -66,6 +66,11 @@ namespace CatFlapRelay
             if (option.UdpTunnelTimeout < TimeSpan.Zero)
                 throw new ArgumentException("UdpTunnelTimeout cannot be negative", nameof(option));
 
+            const int MaxUdpSenderCount = 64;
+            if (option.UdpSenderCount < 1 || option.UdpSenderCount > MaxUdpSenderCount
+                || !System.Numerics.BitOperations.IsPow2((uint)option.UdpSenderCount))
+                throw new ArgumentException($"UdpSenderCount must be a power of two between 1 and {MaxUdpSenderCount}", nameof(option));
+
             if (!option.TCP && !option.UDP)
                 throw new ArgumentException("At least one of TCP or UDP must be enabled", nameof(option));
 
@@ -138,6 +143,15 @@ namespace CatFlapRelay
         public RelayBuilder WithUdpTunnelTimeout(TimeSpan timeout)
         {
             _option.UdpTunnelTimeout = timeout;
+            return this;
+        }
+
+        /// <summary>
+        /// Sets the number of UDP sender workers (a power of two, 1 to 64; default 1).
+        /// </summary>
+        public RelayBuilder WithUdpSenderCount(int count)
+        {
+            _option.UdpSenderCount = count;
             return this;
         }
 

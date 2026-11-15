@@ -56,6 +56,12 @@ internal static class Program
             DefaultValueFactory = _ => 1000
         };
 
+        var udpSendersOption = new Option<int>("--udp-senders")
+        {
+            Description = Strings.UdpSendersDescription,
+            DefaultValueFactory = _ => 1
+        };
+
         var dualModeOption = new Option<bool>("--dual-mode")
         {
             Description = Strings.DualModeDescription
@@ -70,6 +76,7 @@ internal static class Program
         rootCommand.Options.Add(noUdpOption);
         rootCommand.Options.Add(bufferSizeOption);
         rootCommand.Options.Add(timeoutOption);
+        rootCommand.Options.Add(udpSendersOption);
         rootCommand.Options.Add(dualModeOption);
 
         rootCommand.SetAction(async (parseResult, ct) =>
@@ -87,6 +94,7 @@ internal static class Program
                 udp: !parseResult.GetValue(noUdpOption),
                 bufferSize: parseResult.GetValue(bufferSizeOption),
                 timeoutMs: parseResult.GetValue(timeoutOption),
+                udpSenders: parseResult.GetValue(udpSendersOption),
                 dualMode: parseResult.GetValue(dualModeOption),
                 logLevel: logLevel,
                 ct: ct);
@@ -127,7 +135,7 @@ internal static class Program
     private static async Task<int> RunRelayAsync(
         string listen, string target, string name,
         bool tcp, bool udp, int bufferSize, int timeoutMs,
-        bool dualMode, LogEventLevel logLevel, CancellationToken ct)
+        int udpSenders, bool dualMode, LogEventLevel logLevel, CancellationToken ct)
     {
         var option = new FlapRelayOption
         {
@@ -138,6 +146,7 @@ internal static class Program
             UDP = udp,
             BufferSize = bufferSize,
             SocketTimeout = TimeSpan.FromMilliseconds(timeoutMs),
+            UdpSenderCount = udpSenders,
             DualMode = dualMode,
         };
 

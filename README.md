@@ -106,6 +106,7 @@ var relay = FlapRelayFactory.CreateBuilder(loggerFactory)
     .ListenOn("0.0.0.0:8080")
     .ForwardTo("192.168.1.100:3389")
     .WithBufferSize(131072)
+    .WithUdpSenderCount(1)   // power of two, 1-64
     .WithSocketTimeout(TimeSpan.FromMilliseconds(1000))
     .EnableTCP()
     .EnableUDP()   // or .TCPOnly() / .UDPOnly()
@@ -164,6 +165,7 @@ catflaprelay-cli -l 0.0.0.0:5000 -t 10.0.0.1:5000 -v
 | `--no-udp` | `-U` | Disable UDP forwarding | `false` |
 | `--buffer-size` | `-b` | I/O buffer size in bytes | `131072` (128 KB) |
 | `--timeout` | | Socket timeout in milliseconds | `1000` |
+| `--udp-senders` | | Number of UDP sender workers (power of two, 1–64). Packets of one client always use the same sender, so order is preserved. Only raise for very high packet rates from many clients. | `1` |
 | `--dual-mode` | | Accept IPv4 connections on an IPv6 socket (`[::]`). Linux defaults to IPv6-only (RFC 3493); this flag mirrors Windows behaviour. | `false` |
 | `--verbose` | `-v` | Enable debug logging | `false` |
 | `--quiet` | `-q` | Suppress info logging | `false` |

@@ -12,6 +12,8 @@ namespace CatFlapRelay
         public long TcpBytesReceived { get; init; }
         public long UdpBytesSent { get; init; }
         public long UdpBytesReceived { get; init; }
+        /// <summary>Client datagrams discarded because the UDP sender queue was full (relay overloaded).</summary>
+        public long UdpPacketsDropped { get; init; }
         public long TotalBytesTransferred => TcpBytesSent + TcpBytesReceived + UdpBytesSent + UdpBytesReceived;
         public long ConnectionErrors { get; init; }
     }

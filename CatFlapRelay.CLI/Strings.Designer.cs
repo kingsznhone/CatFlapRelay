@@ -161,6 +161,15 @@ namespace CatFlapRelay.CLI {
         }
 
         /// <summary>
+        ///   查找类似 Number of UDP sender workers 的本地化字符串。
+        /// </summary>
+        public static string UdpSendersDescription {
+            get {
+                return ResourceManager.GetString("UdpSendersDescription", resourceCulture);
+            }
+        }
+
+        /// <summary>
         ///   查找类似 Enable verbose (Debug) logging 的本地化字符串。
         /// </summary>
         public static string VerboseDescription {

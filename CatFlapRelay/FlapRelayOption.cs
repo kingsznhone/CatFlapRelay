@@ -34,6 +34,15 @@ namespace CatFlapRelay
         public TimeSpan UdpTunnelTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
         /// <summary>
+        /// Number of UDP sender workers that write forwarded client datagrams to the target.
+        /// Must be a power of two between 1 and 64. The default of 1 already decouples receiving
+        /// from sending; raise it for workloads with very high packet rates from many clients.
+        /// Datagrams are assigned to a sender by hashing the client endpoint, so all datagrams of
+        /// one client always go through the same sender and are never reordered by the relay.
+        /// </summary>
+        public int UdpSenderCount { get; set; } = 1;
+
+        /// <summary>
         /// When true and the listen address is an IPv6 address, enables dual-stack mode so the
         /// socket accepts both IPv4 and IPv6 connections (sets IPV6_V6ONLY = false).
         /// Linux defaults to IPV6_V6ONLY = true (RFC 3493); set this explicitly when you want
