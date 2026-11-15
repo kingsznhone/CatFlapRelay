@@ -29,4 +29,5 @@ internal sealed class RelayEntry
     public TimeSpan SocketTimeout { get; set; }
     public TimeSpan UdpTunnelTimeout { get; set; }
     public bool DualMode { get; set; } = false;
+    public int UdpSenderCount { get; set; } = 1;
 }

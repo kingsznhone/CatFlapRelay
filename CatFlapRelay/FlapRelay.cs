@@ -1,3 +1,6 @@
+// Licensed to the .NET Foundation under one or more agreements.
+// The .NET Foundation licenses this file to you under the MIT license.
+
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
@@ -129,13 +132,16 @@ namespace CatFlapRelay
                     if (_option.TCP)
                     {
                         _tcpListener = new TcpListener(_listenEndpoint.Address, _listenEndpoint.Port);
-                        if (_option.DualMode && _listenEndpoint.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                        if (_option.DualMode && _listenEndpoint.AddressFamily == AddressFamily.InterNetworkV6)
+                        {
                             _tcpListener.Server.DualMode = true;
+                        }
+
                         _tcpListener.Start();
                     }
                     if (_option.UDP)
                     {
-                        if (_option.DualMode && _listenEndpoint.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                        if (_option.DualMode && _listenEndpoint.AddressFamily == AddressFamily.InterNetworkV6)
                         {
                             _udpListener = new UdpClient(_listenEndpoint.AddressFamily);
                             _udpListener.Client.DualMode = true;
@@ -217,7 +223,9 @@ namespace CatFlapRelay
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.CompareExchange(ref _disposed, 1, 0) == 1)
+            {
                 return;
+            }
 
             using var cts = new CancellationTokenSource(_disposeTimeout);
             try
@@ -239,8 +247,15 @@ namespace CatFlapRelay
         {
             // Wait for main forwarding tasks
             var tasksToWait = new List<Task>(2);
-            if (_tcpForwardingTask != null) tasksToWait.Add(_tcpForwardingTask);
-            if (_udpForwardingTask != null) tasksToWait.Add(_udpForwardingTask);
+            if (_tcpForwardingTask != null)
+            {
+                tasksToWait.Add(_tcpForwardingTask);
+            }
+
+            if (_udpForwardingTask != null)
+            {
+                tasksToWait.Add(_udpForwardingTask);
+            }
 
             if (tasksToWait.Count > 0)
             {
@@ -397,9 +412,13 @@ namespace CatFlapRelay
                     await targetStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
 
                     if (isClientToTarget)
+                    {
                         Interlocked.Add(ref _tcpBytesSent, bytesRead);
+                    }
                     else
+                    {
                         Interlocked.Add(ref _tcpBytesReceived, bytesRead);
+                    }
                 }
 
                 // Graceful shutdown: close write side
@@ -489,7 +508,9 @@ namespace CatFlapRelay
                     }
 
                     if (tunnelInfo is null)
+                    {
                         continue;
+                    }
 
                     // Update last activity
                     tunnelInfo.LastActivity = DateTime.UtcNow;
@@ -519,12 +540,17 @@ namespace CatFlapRelay
             {
                 // Let the senders drain what is queued (or exit at once when cancelled), then recycle leftovers.
                 foreach (var queue in queues)
+                {
                     queue.Writer.TryComplete();
+                }
+
                 await Task.WhenAll(senders).ConfigureAwait(false);
                 foreach (var queue in queues)
                 {
                     while (queue.Reader.TryRead(out var leftover))
+                    {
                         ArrayPool<byte>.Shared.Return(leftover.Buffer);
+                    }
                 }
             }
         }
@@ -537,7 +563,9 @@ namespace CatFlapRelay
         private static int GetSenderIndex(IPEndPoint clientEndpoint, int senderCount)
         {
             if (senderCount == 1)
+            {
                 return 0;
+            }
 
             int hash = HashCode.Combine(clientEndpoint.Address, clientEndpoint.Port);
             return hash & (senderCount - 1);
@@ -663,7 +691,10 @@ namespace CatFlapRelay
         private static void DisableUdpConnReset(Socket socket)
         {
             if (!OperatingSystem.IsWindows())
+            {
                 return;
+            }
+
             const int SIO_UDP_CONNRESET = -1744830452;
             try { socket.IOControl((IOControlCode)SIO_UDP_CONNRESET, [0, 0, 0, 0], null); }
             catch (SocketException) { }

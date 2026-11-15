@@ -46,4 +46,11 @@ public class RelayRequest
     /// </summary>
     [DefaultValue(false)]
     public bool DualMode { get; init; } = false;
+
+    /// <summary>
+    /// Number of UDP sender workers: a power of two from 1 to 64. Datagrams of one client always use
+    /// the same sender, so per-client order is preserved. Raise only for very high packet rates from many clients.
+    /// </summary>
+    [DefaultValue(1)]
+    public int UdpSenderCount { get; init; } = 1;
 }

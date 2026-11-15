@@ -1,0 +1,10 @@
+@page "/api-docs"
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+
+<PageTitle>API</PageTitle>
+
+@* Swagger UI is served by the Swashbuckle middleware at /swagger. It is embedded here so it stays inside the
+   Panel layout. The route must not start with "/api": Program.cs answers 401 instead of redirecting to the
+   login page for every path under /api. *@
+<iframe class="swagger-frame" src="swagger/index.html" title="Swagger UI"></iframe>

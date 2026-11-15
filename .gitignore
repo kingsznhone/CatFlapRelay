@@ -398,7 +398,3 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
-
-# benchmark output
-tools/bench/results/
-tools/bench/.tools/

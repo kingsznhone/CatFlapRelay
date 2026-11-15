@@ -62,9 +62,9 @@
                }
                @if (Relay.Option.UDP)
                {
-                   <Tag>UDP</Tag>
+                   <Tag>@(Relay.Option.UdpSenderCount > 1 ? $"UDP ×{Relay.Option.UdpSenderCount}" : "UDP")</Tag>
                }
-               <span style="color: rgba(0,0,0,0.45); margin-left: auto">Buffer: @FormatBytes(Relay.Option.BufferSize)</span>
+               <span style="color: rgba(0,0,0,0.45); margin-left: auto; white-space: nowrap">Buffer: @FormatBytes(Relay.Option.BufferSize)</span>
            </Flex>
 
            <Divider Style="margin: 4px 0;" />
@@ -74,15 +74,17 @@
                    <span style="font-size:12px; color: rgba(0,0,0,0.45)">TCP Active</span>
                    <Text Strong>@s.TcpActiveConnections</Text>
                </Flex>
-               <Flex Direction="FlexDirection.Vertical" Align="FlexAlign.Center">
-                   <span style="font-size:12px; color: rgba(0,0,0,0.45)">TCP Total</span>
-                   <Text Strong>@s.TcpTotalConnections</Text>
-               </Flex>
                @if (Relay.Option.UDP)
                {
                    <Flex Direction="FlexDirection.Vertical" Align="FlexAlign.Center">
                        <span style="font-size:12px; color: rgba(0,0,0,0.45)">UDP Tunnels</span>
                        <Text Strong>@s.UdpActiveTunnels</Text>
+                   </Flex>
+                   <Flex Direction="FlexDirection.Vertical" Align="FlexAlign.Center">
+                       <span style="font-size:12px; color: rgba(0,0,0,0.45)">UDP Dropped</span>
+                       <Tooltip Title="@($"{s.UdpPacketsDropped:N0} UDP datagrams dropped because the relay was overloaded")">
+                           <Text Strong Style="@(_droppingNow ? "color:#ff4d4f" : "")">@FormatCount(s.UdpPacketsDropped)</Text>
+                       </Tooltip>
                    </Flex>
                }
                <Flex Direction="FlexDirection.Vertical" Align="FlexAlign.Center">
@@ -117,6 +119,10 @@
     private FlapRelayStatistics _stats = new();
     private CancellationTokenSource _refreshCts = new();
 
+    // True only while the dropped-datagram counter grew during the last refresh interval, so the
+    // number is red while the relay is actively overloaded and returns to normal once drops stop.
+    private bool _droppingNow;
+
     protected override void OnInitialized()
     {
         _stats = Relay.Statistics;
@@ -130,7 +136,9 @@
         {
             while (await timer.WaitForNextTickAsync(ct))
             {
-                _stats = Relay.Statistics;
+                var latest = Relay.Statistics;
+                _droppingNow = latest.UdpPacketsDropped > _stats.UdpPacketsDropped;
+                _stats = latest;
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -155,7 +163,9 @@
             UDP = Relay.Option.UDP,
             BufferSize = Relay.Option.BufferSize,
             SocketTimeout = Relay.Option.SocketTimeout,
-            UdpTunnelTimeout = Relay.Option.UdpTunnelTimeout
+            UdpTunnelTimeout = Relay.Option.UdpTunnelTimeout,
+            DualMode = Relay.Option.DualMode,
+            UdpSenderCount = Relay.Option.UdpSenderCount
         };
         _editModalRef?.Show();
     }
@@ -182,6 +192,14 @@
         >= 1024 * 1024         => $"{bytes / (1024.0 * 1024):F1} MB",
         >= 1024                => $"{bytes / 1024.0:F1} KB",
         _                      => $"{bytes} B"
+    };
+
+    // Compact form keeps the stat cell a fixed width however large the counter grows.
+    private static string FormatCount(long n) => n switch
+    {
+        >= 1_000_000 => $"{n / 1_000_000.0:0.##}M",
+        >= 10_000    => $"{n / 1_000.0:0.#}K",
+        _            => n.ToString()
     };
 
     private static string FormatUptime(TimeSpan uptime) =>

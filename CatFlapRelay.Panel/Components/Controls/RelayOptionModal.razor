@@ -44,6 +44,16 @@
         <FormItem Label="Dual Mode">
             <Switch @bind-Value="@context.DualMode" />
         </FormItem>
+        <FormItem Label="UDP Senders">
+            <Select TItemValue="int" TItem="string" @bind-Value="@context.UdpSenderCount" Disabled="@(!context.UDP)" Style="width:160px">
+                <SelectOptions>
+                    @foreach (var n in s_udpSenderCounts)
+                    {
+                        <SelectOption TItemValue="int" TItem="string" Value="@n" Label="@n.ToString()" />
+                    }
+                </SelectOptions>
+            </Select>
+        </FormItem>
     </Form>
 </Modal>
 @code {
@@ -54,6 +64,9 @@
     public bool IsEdit { get; set; }
 
     private bool _visible { get; set; } = false;
+
+    // FlapRelayFactory.ValidateOption only accepts powers of two from 1 to 64.
+    private static readonly int[] s_udpSenderCounts = [1, 2, 4, 8, 16, 32, 64];
 
     private double SocketTimeoutSeconds
     {

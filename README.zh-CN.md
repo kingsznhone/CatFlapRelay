@@ -89,7 +89,7 @@ var relay = factory.CreateRelay(new FlapRelayOption
     BufferSize = 131072,
 });
 
-await relay.StartAsync();
+relay.Start();
 
 // ...
 
@@ -113,7 +113,7 @@ var relay = FlapRelayFactory.CreateBuilder(loggerFactory)
     .EnableDualMode()  // 可选：在 IPv6 套接字 [::] 上同时接受 IPv4 连接（仅 Linux 需要）
     .Build();
 
-await relay.StartAsync();
+relay.Start();
 
 // ...
 

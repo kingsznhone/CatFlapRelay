@@ -89,7 +89,7 @@ var relay = factory.CreateRelay(new FlapRelayOption
     BufferSize = 131072,
 });
 
-await relay.StartAsync();
+relay.Start();
 
 // ...
 
@@ -113,7 +113,7 @@ var relay = FlapRelayFactory.CreateBuilder(loggerFactory)
     .EnableDualMode()  // optional: accept IPv4 on [::] socket (Linux only needs this)
     .Build();
 
-await relay.StartAsync();
+relay.Start();
 
 // ...
 
